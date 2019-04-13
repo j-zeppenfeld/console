@@ -37,6 +37,8 @@ private:
 	std::string _prompt;
 	// Buffer for partial escape sequences.
 	std::string _escBuffer;
+	// Buffer for partial utf8 sequences.
+	std::string _utf8Buffer;
 	// The current command being entered.
 	std::string _commandLine;
 	// Position of the cursor within command.

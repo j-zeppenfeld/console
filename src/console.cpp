@@ -241,6 +241,50 @@ namespace CSI {
 	}
 }
 
+//------------------------------------------------------------------------------
+//--                          UTF-8 Helper Functions                          --
+//------------------------------------------------------------------------------
+namespace Utf8 {
+	// Count number of utf8 octets at position.
+	size_t countOctets(std::string const &str, size_t pos) {
+		uint8_t masked = uint8_t(str[pos]) & 0xff;
+		if(masked < 0x80) {
+			return 1;
+		} else if ((masked >> 5) == 0x6) {
+			return 2;
+		} else if ((masked >> 4) == 0xe) {
+			return 3;
+		} else if ((masked >> 3) == 0x1e) {
+			return 4;
+		} else {
+			return 0;
+		}
+	}
+	
+	// Previous utf8 starting position.
+	size_t posPrev(std::string const &str, size_t pos) {
+		if(pos) {
+			while((str[--pos] & 0xc0) == 0x80) {
+				if(pos == 0) {
+					break;
+				}
+			}
+		}
+		return pos;
+	}
+	
+	// Next utf8 starting position.
+	size_t posNext(std::string const &str, size_t pos) {
+		if(pos < str.size()) {
+			pos += countOctets(str, pos);
+			if(pos > str.size()) {
+				pos = str.size();
+			}
+		}
+		return pos;
+	}
+}
+
 }
 //                      End namespace <helper functions>                      //
 //------------------------------------------------------------------------------
@@ -288,6 +332,7 @@ bool Console::putc(char c) {
 		} else {
 			_cursor = 0;
 			_commandLine.clear();
+			_utf8Buffer.clear();
 			_escBuffer.clear();
 			refresh();
 		}
@@ -304,11 +349,11 @@ bool Console::putc(char c) {
 		break;
 	case DEL:
 	case BS: {
+		// Erase complete utf8 codepoint.
 		size_t end = _cursor;
-		if(_cursor) {
-			--_cursor;
-		}
+		_cursor = Utf8::posPrev(_commandLine, _cursor);
 		_commandLine.erase(_cursor, end - _cursor);
+		_utf8Buffer.clear();
 		_escBuffer.clear();
 		refresh();
 		break; }
@@ -326,10 +371,12 @@ bool Console::putc(char c) {
 		
 		_cursor = 0;
 		_commandLine.clear();
+		_utf8Buffer.clear();
 		_escBuffer.clear();
 		refresh();
 		break; }
 	case ESC:
+		_utf8Buffer.clear();
 		_escBuffer = c;
 		break;
 	default: {
@@ -347,30 +394,26 @@ bool Console::putc(char c) {
 				// TODO: Browse history.
 				break;
 			case CSI::Key::LEFT_ARROW:
-				if(_cursor) {
-					--_cursor;
-				}
+				_cursor = Utf8::posPrev(_commandLine, _cursor);
 				break;
 			case CSI::Key::RIGHT_ARROW:
-				if(_cursor < _commandLine.size()) {
-					++_cursor;
-				}
+				_cursor = Utf8::posNext(_commandLine, _cursor);
 				break;
 			case CSI::Key::SHIFT_LEFT_ARROW:
-				if(_cursor) {
-					while(--_cursor) {
-						if(_commandLine[_cursor - 1] == ' ') {
-							break;
-						}
+				_cursor = Utf8::posPrev(_commandLine, _cursor);
+				while(_cursor) {
+					size_t pos = Utf8::posPrev(_commandLine, _cursor);
+					if(_commandLine[pos] == ' ') {
+						break;
 					}
+					_cursor = pos;
 				}
 				break;
 			case CSI::Key::SHIFT_RIGHT_ARROW:
-				if(_cursor < _commandLine.size()) {
-					while(++_cursor < _commandLine.size()) {
-						if(_commandLine[_cursor] == ' ') {
-							break;
-						}
+				while((_cursor = Utf8::posNext(_commandLine, _cursor))
+				      < _commandLine.size()) {
+					if(_commandLine[_cursor] == ' ') {
+						break;
 					}
 				}
 				break;
@@ -381,10 +424,8 @@ bool Console::putc(char c) {
 				_cursor = _commandLine.size();
 				break;
 			case CSI::Key::DEL: {
-				size_t end = _cursor;
-				if(end < _commandLine.size()) {
-					++end;
-				}
+				// Erase complete utf8 codepoint.
+				size_t end = Utf8::posNext(_commandLine, _cursor);
 				_commandLine.erase(_cursor, end - _cursor);
 				break; }
 			case CSI::Key::INVALID:
@@ -398,9 +439,13 @@ bool Console::putc(char c) {
 			}
 		}
 		if(!escChar) {
-			// Insert or append character to command.
-			_commandLine.insert(_cursor, 1, c);
-			++_cursor;
+			_utf8Buffer.push_back(c);
+			if(Utf8::countOctets(_utf8Buffer, 0) == _utf8Buffer.size()) {
+				// Insert or append character to command.
+				_commandLine.insert(_cursor, _utf8Buffer);
+				_cursor += _utf8Buffer.size();
+				_utf8Buffer.clear();
+			}
 		}
 		
 		refresh();
@@ -419,7 +464,11 @@ void Console::refresh() const {
 		std::cout << _prompt << _commandLine;
 		
 		// Move cursor backwards to appropriate position.
-		for(size_t pos = _commandLine.size(); pos > _cursor; --pos) {
+		for(
+			size_t pos = _commandLine.size();
+			pos > _cursor;
+			pos = Utf8::posPrev(_commandLine, pos)
+		) {
 			std::cout << CSI::left;
 		}
 		
