@@ -3,6 +3,11 @@
 #include <iostream>
 
 class MyConsole : public Console::Console {
+private:
+	// Called when a command has been entered.
+	virtual void onCommand(std::string command) override {
+		std::cout << command << std::endl;
+	}
 };
 
 int main() try {

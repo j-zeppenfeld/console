@@ -11,6 +11,7 @@
 
 #include <iostream>
 #include <stdexcept>
+#include <vector>
 
 //------------------------------------------------------------------------------
 //                          Begin namespace Console                           //
@@ -139,6 +140,107 @@ namespace {
 	};
 #endif
 
+//------------------------------------------------------------------------------
+//--                           CSI Escape Sequences                           --
+//------------------------------------------------------------------------------
+namespace CSI {
+	// Graphic parameters.
+	auto constexpr resetAttributes = "\033[0m";
+	auto constexpr bright = "\033[1m";
+	
+	// Foreground colors.
+	auto constexpr black = "\033[30m";
+	auto constexpr red = "\033[31m";
+	auto constexpr green = "\033[32m";
+	auto constexpr yellow = "\033[33m";
+	auto constexpr blue = "\033[34m";
+	auto constexpr magenta = "\033[35m";
+	auto constexpr cyan = "\033[36m";
+	auto constexpr white = "\033[37m";
+	
+	// Background colors.
+	auto constexpr bgBlack = "\033[40m";
+	auto constexpr bgRed = "\033[41m";
+	auto constexpr bgGreen = "\033[42m";
+	auto constexpr bgYellow = "\033[43m";
+	auto constexpr bgBlue = "\033[44m";
+	auto constexpr bgMagenta = "\033[45m";
+	auto constexpr bgCyan = "\033[46m";
+	auto constexpr bgWhite = "\033[47m";
+	
+	// Display refresh.
+	auto constexpr clear = "\033[2K\r";
+	
+	// Cursor movement.
+	auto constexpr up = "\033[A";
+	auto constexpr down = "\033[B";
+	auto constexpr right = "\033[C";
+	auto constexpr left = "\033[D";
+	
+	enum Key {
+		INVALID,
+		INCOMPLETE,
+		
+		UP_ARROW,
+		DOWN_ARROW,
+		RIGHT_ARROW,
+		LEFT_ARROW,
+		
+		SHIFT_UP_ARROW,
+		SHIFT_DOWN_ARROW,
+		SHIFT_RIGHT_ARROW,
+		SHIFT_LEFT_ARROW,
+		
+		HOME,
+		END,
+		INSERT,
+		DEL,
+		PAGE_UP,
+		PAGE_DOWN
+	};
+	Key getKey(std::string const &str) {
+		static std::vector<std::pair<std::string, Key>> keyMap {
+			{"\033[A", Key::UP_ARROW},
+			{"\033[B", Key::DOWN_ARROW},
+			{"\033[C", Key::RIGHT_ARROW},
+			{"\033[D", Key::LEFT_ARROW},
+			
+			{"\033OA", Key::SHIFT_UP_ARROW},
+			{"\033OB", Key::SHIFT_DOWN_ARROW},
+			{"\033OC", Key::SHIFT_RIGHT_ARROW},
+			{"\033OD", Key::SHIFT_LEFT_ARROW},
+			{"\033OF", Key::END},
+			{"\033OH", Key::HOME},
+			
+			{"\033[F", Key::END},
+			{"\033[H", Key::HOME},
+			
+			{"\033[1;5A", Key::SHIFT_UP_ARROW},
+			{"\033[1;5B", Key::SHIFT_DOWN_ARROW},
+			{"\033[1;5C", Key::SHIFT_RIGHT_ARROW},
+			{"\033[1;5D", Key::SHIFT_LEFT_ARROW},
+			
+			{"\033[1~", Key::HOME},
+			{"\033[2~", Key::INSERT},
+			{"\033[3~", Key::DEL},
+			{"\033[4~", Key::END},
+			{"\033[5~", Key::PAGE_UP},
+			{"\033[6~", Key::PAGE_DOWN}
+		};
+		Key key = Key::INVALID;
+		for(auto &pair : keyMap) {
+			if(pair.first.find(str) == 0) {
+				if(str.size() == pair.first.size()) {
+					return pair.second;
+				} else {
+					key = Key::INCOMPLETE;
+				}
+			}
+		}
+		return key;
+	}
+}
+
 }
 //                      End namespace <helper functions>                      //
 //------------------------------------------------------------------------------
@@ -147,9 +249,22 @@ namespace {
 //--                              Class Console                               --
 //------------------------------------------------------------------------------
 
-Console::Console() {
+Console::Console()
+: _prompt(": ")
+, _cursor(0)
+, _showPrompt(true)
+, _prev(0) {
 	// Start console.
 	static RawMode raw;
+	
+	// Print prompt.
+	refresh();
+}
+
+// Set the command prompt.
+void Console::setPrompt(std::string prompt) {
+	_prompt = std::move(prompt);
+	refresh();
 }
 
 // Push a character of input to the console.
@@ -166,37 +281,151 @@ bool Console::putc(char c) {
 	
 	switch(c) {
 	case CTRL_C:
-		std::cout << "^C" << std::endl;
+		std::cout << "\r\n^C" << std::endl;
+		if(_commandLine.empty()) {
+			_showPrompt = false;
+			return false;
+		} else {
+			_cursor = 0;
+			_commandLine.clear();
+			_escBuffer.clear();
+			refresh();
+		}
 		break;
 	case CTRL_D:
-		std::cout << "^D" << std::endl;
+		std::cout << "\r\n^D" << std::endl;
+		_showPrompt = false;
 		return false;
 	case CTRL_R:
-		std::cout << "^R" << std::endl;
+		// TODO: History search.
 		break;
 	case TAB:
-		std::cout << "TAB" << std::endl;
+		// TODO: Autocompletion.
 		break;
 	case DEL:
-		std::cout << "DEL" << std::endl;
-		break;
-	case BS:
-		std::cout << "BS" << std::endl;
-		break;
+	case BS: {
+		size_t end = _cursor;
+		if(_cursor) {
+			--_cursor;
+		}
+		_commandLine.erase(_cursor, end - _cursor);
+		_escBuffer.clear();
+		refresh();
+		break; }
 	case LF:
-		std::cout << "LF" << std::endl;
-		break;
-	case CR:
-		std::cout << "CR" << std::endl;
-		break;
+		if(_prev == CR) {
+			break;
+		}
+		goto CR; // [[fallthrough]]
+	case CR: CR: {
+		std::cout << std::endl;
+		
+		if(!_commandLine.empty()) {
+			onCommand(std::move(_commandLine));
+		}
+		
+		_cursor = 0;
+		_commandLine.clear();
+		_escBuffer.clear();
+		refresh();
+		break; }
 	case ESC:
-		std::cout << "ESC" << std::endl;
+		_escBuffer = c;
 		break;
-	default:
-		std::cout << c << std::endl;
-		break;
+	default: {
+		bool escChar = !_escBuffer.empty();
+		if(escChar) {
+			_escBuffer.push_back(c);
+			CSI::Key key = CSI::getKey(_escBuffer);
+			switch(key) {
+			case CSI::Key::INCOMPLETE:
+				break;
+			case CSI::Key::UP_ARROW:
+				// TODO: Browse history.
+				break;
+			case CSI::Key::DOWN_ARROW:
+				// TODO: Browse history.
+				break;
+			case CSI::Key::LEFT_ARROW:
+				if(_cursor) {
+					--_cursor;
+				}
+				break;
+			case CSI::Key::RIGHT_ARROW:
+				if(_cursor < _commandLine.size()) {
+					++_cursor;
+				}
+				break;
+			case CSI::Key::SHIFT_LEFT_ARROW:
+				if(_cursor) {
+					while(--_cursor) {
+						if(_commandLine[_cursor - 1] == ' ') {
+							break;
+						}
+					}
+				}
+				break;
+			case CSI::Key::SHIFT_RIGHT_ARROW:
+				if(_cursor < _commandLine.size()) {
+					while(++_cursor < _commandLine.size()) {
+						if(_commandLine[_cursor] == ' ') {
+							break;
+						}
+					}
+				}
+				break;
+			case CSI::Key::HOME:
+				_cursor = 0;
+				break;
+			case CSI::Key::END:
+				_cursor = _commandLine.size();
+				break;
+			case CSI::Key::DEL: {
+				size_t end = _cursor;
+				if(end < _commandLine.size()) {
+					++end;
+				}
+				_commandLine.erase(_cursor, end - _cursor);
+				break; }
+			case CSI::Key::INVALID:
+			default:
+				std::cout << "\r\nUnknown escape sequence: ESC "
+				          << _escBuffer.substr(1) << std::endl;
+				break;
+			};
+			if(key != CSI::Key::INCOMPLETE) {
+				_escBuffer.clear();
+			}
+		}
+		if(!escChar) {
+			// Insert or append character to command.
+			_commandLine.insert(_cursor, 1, c);
+			++_cursor;
+		}
+		
+		refresh();
+		
+		break; }
 	}
+	_prev = c;
 	return true;
+}
+
+// Refresh the command prompt.
+void Console::refresh() const {
+	if(_showPrompt) {
+		// Show prompt line.
+		std::cout << CSI::clear << CSI::green;
+		std::cout << _prompt << _commandLine;
+		
+		// Move cursor backwards to appropriate position.
+		for(size_t pos = _commandLine.size(); pos > _cursor; --pos) {
+			std::cout << CSI::left;
+		}
+		
+		// Reset all attributes/color.
+		std::cout << CSI::resetAttributes << std::flush;
+	}
 }
 
 }
