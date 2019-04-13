@@ -1,6 +1,8 @@
 #ifndef CONSOLE_CONSOLE_H
 #define CONSOLE_CONSOLE_H
 
+#include "history.h"
+
 #include <string>
 
 //------------------------------------------------------------------------------
@@ -16,10 +18,18 @@ class Console {
 	Console &operator=(Console const &) = delete;
 	
 public:
-	Console();
+	// Construct a console with the specified maximum command history size.
+	Console(size_t historySize = 256);
 	
 	// Set the command prompt.
 	void setPrompt(std::string prompt);
+	
+	// Load the command history from the specified file.
+	void loadHistory(std::string const &path);
+	// Save the command history to the specified file.
+	void saveHistory(std::string const &path);
+	// Add the specified string to the end of the history.
+	void addHistory(std::string command);
 	
 	// Push a character of input to the console.
 	bool putc(char c);
@@ -33,6 +43,9 @@ private:
 	void refresh() const;
 	
 private:
+	// Command history.
+	History _history;
+	
 	// The current command prompt.
 	std::string _prompt;
 	// Buffer for partial escape sequences.

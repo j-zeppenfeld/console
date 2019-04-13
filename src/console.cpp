@@ -293,8 +293,10 @@ namespace Utf8 {
 //--                              Class Console                               --
 //------------------------------------------------------------------------------
 
-Console::Console()
-: _prompt(": ")
+// Construct a console with the specified maximum history size.
+Console::Console(size_t historySize)
+: _history(historySize)
+, _prompt(": ")
 , _cursor(0)
 , _showPrompt(true)
 , _prev(0) {
@@ -309,6 +311,21 @@ Console::Console()
 void Console::setPrompt(std::string prompt) {
 	_prompt = std::move(prompt);
 	refresh();
+}
+
+// Load the command history from the specified file.
+void Console::loadHistory(std::string const &path) {
+	_history.load(path);
+}
+
+// Save the command history to the specified file.
+void Console::saveHistory(std::string const &path) {
+	_history.save(path);
+}
+
+// Add the specified string to the end of the history.
+void Console::addHistory(std::string command) {
+	_history.push(std::move(command));
 }
 
 // Push a character of input to the console.
@@ -334,6 +351,7 @@ bool Console::putc(char c) {
 			_commandLine.clear();
 			_utf8Buffer.clear();
 			_escBuffer.clear();
+			_history.cancel();
 			refresh();
 		}
 		break;
@@ -355,6 +373,7 @@ bool Console::putc(char c) {
 		_commandLine.erase(_cursor, end - _cursor);
 		_utf8Buffer.clear();
 		_escBuffer.clear();
+		_history.cancel();
 		refresh();
 		break; }
 	case LF:
@@ -373,6 +392,7 @@ bool Console::putc(char c) {
 		_commandLine.clear();
 		_utf8Buffer.clear();
 		_escBuffer.clear();
+		_history.cancel();
 		refresh();
 		break; }
 	case ESC:
@@ -388,10 +408,12 @@ bool Console::putc(char c) {
 			case CSI::Key::INCOMPLETE:
 				break;
 			case CSI::Key::UP_ARROW:
-				// TODO: Browse history.
+				_commandLine = _history.backward(_commandLine);
+				_cursor = _commandLine.size();
 				break;
 			case CSI::Key::DOWN_ARROW:
-				// TODO: Browse history.
+				_commandLine = _history.forward(_commandLine);
+				_cursor = _commandLine.size();
 				break;
 			case CSI::Key::LEFT_ARROW:
 				_cursor = Utf8::posPrev(_commandLine, _cursor);
@@ -427,6 +449,7 @@ bool Console::putc(char c) {
 				// Erase complete utf8 codepoint.
 				size_t end = Utf8::posNext(_commandLine, _cursor);
 				_commandLine.erase(_cursor, end - _cursor);
+				_history.cancel();
 				break; }
 			case CSI::Key::INVALID:
 			default:
@@ -445,6 +468,7 @@ bool Console::putc(char c) {
 				_commandLine.insert(_cursor, _utf8Buffer);
 				_cursor += _utf8Buffer.size();
 				_utf8Buffer.clear();
+				_history.cancel();
 			}
 		}
 		

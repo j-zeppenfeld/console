@@ -3,10 +3,20 @@
 #include <iostream>
 
 class MyConsole : public Console::Console {
+public:
+	MyConsole() {
+		loadHistory(".history");
+	}
+	
+	~MyConsole() {
+		saveHistory(".history");
+	}
+	
 private:
 	// Called when a command has been entered.
 	virtual void onCommand(std::string command) override {
 		std::cout << command << std::endl;
+		addHistory(std::move(command));
 	}
 };
 
