@@ -31,14 +31,19 @@ public:
 	
 	// Retrieve the currently selected history entry.
 	std::string const &current() const;
-	// Browse backward to the previous history entry.
+	// Browse or search backward to the previous history entry.
 	// Stores the specified command if not already browsing.
 	std::string const &backward(std::string const &command);
-	// Browse forward to the next history entry.
+	// Browse or search forward to the next history entry.
 	// Stores the specified command if not already browsing.
 	std::string const &forward(std::string const &command);
 	
-	// Reset browsing position to the head of the history.
+	// Check if the history is being searched.
+	bool searching() const { return _search; }
+	// Start searching the history for the specified string.
+	void search(std::string str);
+	
+	// Cancel any search and reset browsing position to the head of the history.
 	void cancel();
 	
 private:
@@ -53,7 +58,7 @@ private:
 	}
 	
 private:
-	// Store current command string while browsing history.
+	// Store current command or search string while browsing history.
 	std::string _stored;
 	// Circular history queue.
 	std::vector<std::string> _history;
@@ -61,6 +66,8 @@ private:
 	size_t _head;
 	// Indicator of a fully utilized history buffer.
 	bool _full;
+	// Indicator of an active history search.
+	bool _search;
 };
 
 }

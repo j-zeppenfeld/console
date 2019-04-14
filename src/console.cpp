@@ -177,6 +177,23 @@ namespace CSI {
 	auto constexpr right = "\033[C";
 	auto constexpr left = "\033[D";
 	
+	// Stream manipulators for cursor movement.
+	class leftN {
+	public:
+		leftN(size_t n) : _n(n) { }
+		
+		friend std::ostream &operator<<(std::ostream &os, leftN const &left) {
+			if(left._n > 0) {
+				os << "\033[" << std::dec << left._n << "D";
+			}
+			return os;
+		}
+		
+	private:
+		size_t _n;
+	};
+	
+	// Retrieve key code corresponding to an escape sequence.
 	enum Key {
 		INVALID,
 		INCOMPLETE,
@@ -283,6 +300,13 @@ namespace Utf8 {
 		}
 		return pos;
 	}
+	
+	// Count number of utf8 octets in string, starting at pos.
+	size_t count(std::string const &str, size_t pos = 0) {
+		size_t n = 0;
+		for(; pos < str.size(); pos = posNext(str, pos), ++n);
+		return n;
+	}
 }
 
 }
@@ -299,6 +323,7 @@ Console::Console(size_t historySize)
 , _prompt(": ")
 , _cursor(0)
 , _showPrompt(true)
+, _search(false)
 , _prev(0) {
 	// Start console.
 	static RawMode raw;
@@ -343,7 +368,7 @@ bool Console::putc(char c) {
 	switch(c) {
 	case CTRL_C:
 		std::cout << "\r\n^C" << std::endl;
-		if(_commandLine.empty()) {
+		if(_commandLine.empty() && !_search) {
 			_showPrompt = false;
 			return false;
 		} else {
@@ -352,6 +377,7 @@ bool Console::putc(char c) {
 			_utf8Buffer.clear();
 			_escBuffer.clear();
 			_history.cancel();
+			_search = false;
 			refresh();
 		}
 		break;
@@ -360,9 +386,35 @@ bool Console::putc(char c) {
 		_showPrompt = false;
 		return false;
 	case CTRL_R:
-		// TODO: History search.
+		_utf8Buffer.clear();
+		_escBuffer.clear();
+		if(_search) {
+			_history.backward(_commandLine);
+		} else {
+			_search = true;
+			_history.search(_commandLine);
+		}
+		refresh();
 		break;
 	case TAB:
+		_utf8Buffer.clear();
+		_escBuffer.clear();
+		// Adopt search result.
+		if(_search) {
+			std::string const &result = _history.current();
+			if(!result.empty()) {
+				_commandLine = result;
+			}
+			_cursor = _commandLine.size();
+			_history.cancel();
+			_search = false;
+			refresh();
+			break;
+		// Abort escaped search.
+		} else if(_history.searching()) {
+			_history.cancel();
+		}
+		
 		// TODO: Autocompletion.
 		break;
 	case DEL:
@@ -373,7 +425,11 @@ bool Console::putc(char c) {
 		_commandLine.erase(_cursor, end - _cursor);
 		_utf8Buffer.clear();
 		_escBuffer.clear();
-		_history.cancel();
+		if(_search) {
+			_history.search(_commandLine);
+		} else {
+			_history.cancel();
+		}
 		refresh();
 		break; }
 	case LF:
@@ -382,6 +438,15 @@ bool Console::putc(char c) {
 		}
 		goto CR; // [[fallthrough]]
 	case CR: CR: {
+		if(_search) {
+			std::string const &result = _history.current();
+			if(!result.empty()) {
+				_commandLine = result;
+			}
+			// Redisplay as non-search prompt.
+			_search = false;
+			refresh();
+		}
 		std::cout << std::endl;
 		
 		if(!_commandLine.empty()) {
@@ -393,27 +458,49 @@ bool Console::putc(char c) {
 		_utf8Buffer.clear();
 		_escBuffer.clear();
 		_history.cancel();
+		_search = false;
 		refresh();
 		break; }
 	case ESC:
 		_utf8Buffer.clear();
 		_escBuffer = c;
+		// Cannot differentiate between ESC and an escape sequence, so
+		// deactivate the search temporarily.
+		if(_search) {
+			_search = false;
+			refresh();
+		// Cancel an already escaped search.
+		} else if(_history.searching()) {
+			_history.cancel();
+		}
 		break;
 	default: {
 		bool escChar = !_escBuffer.empty();
 		if(escChar) {
 			_escBuffer.push_back(c);
 			CSI::Key key = CSI::getKey(_escBuffer);
+			// Restore an escaped search with a valid escape sequence.
+			if(key != CSI::Key::INVALID) {
+				_search = _history.searching();
+			}
 			switch(key) {
 			case CSI::Key::INCOMPLETE:
 				break;
 			case CSI::Key::UP_ARROW:
-				_commandLine = _history.backward(_commandLine);
-				_cursor = _commandLine.size();
+				if(_search) {
+					_history.backward(_commandLine);
+				} else {
+					_commandLine = _history.backward(_commandLine);
+					_cursor = _commandLine.size();
+				}
 				break;
 			case CSI::Key::DOWN_ARROW:
-				_commandLine = _history.forward(_commandLine);
-				_cursor = _commandLine.size();
+				if(_search) {
+					_history.forward(_commandLine);
+				} else {
+					_commandLine = _history.forward(_commandLine);
+					_cursor = _commandLine.size();
+				}
 				break;
 			case CSI::Key::LEFT_ARROW:
 				_cursor = Utf8::posPrev(_commandLine, _cursor);
@@ -449,10 +536,19 @@ bool Console::putc(char c) {
 				// Erase complete utf8 codepoint.
 				size_t end = Utf8::posNext(_commandLine, _cursor);
 				_commandLine.erase(_cursor, end - _cursor);
-				_history.cancel();
+				if(_search) {
+					_history.search(_commandLine);
+				} else {
+					_history.cancel();
+				}
 				break; }
 			case CSI::Key::INVALID:
-			default:
+				if(_history.searching() && !_search) {
+					escChar = false;
+					break;
+				}
+				goto DEFAULT; // [[fallthrough]]
+			default: DEFAULT:
 				std::cout << "\r\nUnknown escape sequence: ESC "
 				          << _escBuffer.substr(1) << std::endl;
 				break;
@@ -468,7 +564,11 @@ bool Console::putc(char c) {
 				_commandLine.insert(_cursor, _utf8Buffer);
 				_cursor += _utf8Buffer.size();
 				_utf8Buffer.clear();
-				_history.cancel();
+				if(_search) {
+					_history.search(_commandLine);
+				} else {
+					_history.cancel();
+				}
 			}
 		}
 		
@@ -483,18 +583,30 @@ bool Console::putc(char c) {
 // Refresh the command prompt.
 void Console::refresh() const {
 	if(_showPrompt) {
-		// Show prompt line.
+		// Prepare prompt line.
 		std::cout << CSI::clear << CSI::green;
-		std::cout << _prompt << _commandLine;
+		
+		if(_search) {
+			std::cout << "history search : " << _commandLine;
+			
+			// Print search result.
+			std::string display = " -> ";
+			std::string const &result = _history.current();
+			if(result.empty()) {
+				display += "search failed";
+			} else {
+				display += result;
+			}
+			std::cout << display;
+			
+			// Move cursor backwards to end of command line.
+			std::cout << CSI::leftN(Utf8::count(display));
+		} else {
+			std::cout << _prompt << _commandLine;
+		}
 		
 		// Move cursor backwards to appropriate position.
-		for(
-			size_t pos = _commandLine.size();
-			pos > _cursor;
-			pos = Utf8::posPrev(_commandLine, pos)
-		) {
-			std::cout << CSI::left;
-		}
+		std::cout << CSI::leftN(Utf8::count(_commandLine, _cursor));
 		
 		// Reset all attributes/color.
 		std::cout << CSI::resetAttributes << std::flush;

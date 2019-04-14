@@ -58,6 +58,8 @@ private:
 	size_t _cursor;
 	// Toggle for displaying the command line.
 	bool _showPrompt;
+	// Indicator of an active history search.
+	bool _search;
 	// The most recently pushed character.
 	char _prev;
 };
