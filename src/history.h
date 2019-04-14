@@ -17,9 +17,11 @@ public:
 	History(size_t maxSize = 256);
 	
 	// Load history from the specified file.
-	void load(std::string const &path);
+	// If homeDir is true, path is relative to the user's home directory.
+	void load(std::string const &path, bool homeDir = true);
 	// Save history to the specified file.
-	void save(std::string const &path) const;
+	// If homeDir is true, path is relative to the user's home directory.
+	void save(std::string const &path, bool homeDir = true) const;
 	
 	// Append the specified command to the history.
 	void push(std::string command);

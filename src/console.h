@@ -25,9 +25,11 @@ public:
 	void setPrompt(std::string prompt);
 	
 	// Load the command history from the specified file.
-	void loadHistory(std::string const &path);
+	// If homeDir is true, path is relative to the user's home directory.
+	void loadHistory(std::string const &path, bool homeDir = true);
 	// Save the command history to the specified file.
-	void saveHistory(std::string const &path);
+	// If homeDir is true, path is relative to the user's home directory.
+	void saveHistory(std::string const &path, bool homeDir = true) const;
 	// Add the specified string to the end of the history.
 	void addHistory(std::string command);
 	

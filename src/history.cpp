@@ -11,6 +11,40 @@ namespace Console {
 namespace {
 
 //------------------------------------------------------------------------------
+//--                      Home Directory Helper Function                      --
+//------------------------------------------------------------------------------
+std::string toHomePath(std::string const &path) {
+	// Return path if it is absolute.
+	if(path.empty() || path[0]=='/'
+#if defined(_WIN32) || defined(_WIN64) || defined(WIN32) || defined(WIN64)
+	   || (path.size()>0 && path[1]==':')
+#endif
+	) {
+		return path;
+	}
+	
+	// Prefix path with home directory.
+#if defined(_MSC_VER)
+#	pragma warning(push)
+#	pragma warning(disable:4996) // Disable check for "unsafe" functions.
+#endif
+	char const *homePath = getenv(
+#if defined(_WIN32) || defined(_WIN64) || defined(WIN32) || defined(WIN64)
+		"USERPROFILE"
+#else
+		"HOME"
+#endif
+	);
+#if defined(_MSC_VER)
+#	pragma warning(pop)
+#endif
+	if(!homePath) {
+		return path;
+	}
+	return std::string(homePath) + '/' + path;
+}
+
+//------------------------------------------------------------------------------
 //--                         GetLine Helper Function                          --
 //------------------------------------------------------------------------------
 // See https://stackoverflow.com/a/6089413/694509.
@@ -57,12 +91,12 @@ History::History(size_t maxSize)
 , _search(false) { }
 
 // Load history from the specified file.
-void History::load(std::string const &path) {
+void History::load(std::string const &path, bool homeDir) {
 	_pos = 0;
 	_head = 0;
 	_full = false;
 	
-	std::ifstream file(path);
+	std::ifstream file(homeDir ? toHomePath(path) : path);
 	for(std::string line; safeGetLine(file, line);) {
 		if(!line.empty()) {
 			push(line);
@@ -71,9 +105,9 @@ void History::load(std::string const &path) {
 }
 
 // Save history to the specified file.
-void History::save(std::string const &path) const {
+void History::save(std::string const &path, bool homeDir) const {
 	if(!empty()) {
-		std::ofstream file(path);
+		std::ofstream file(homeDir ? toHomePath(path) : path);
 		size_t i = 0;
 		if(_full) {
 			file << _history[_head] << std::endl;

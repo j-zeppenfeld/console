@@ -339,13 +339,13 @@ void Console::setPrompt(std::string prompt) {
 }
 
 // Load the command history from the specified file.
-void Console::loadHistory(std::string const &path) {
-	_history.load(path);
+void Console::loadHistory(std::string const &path, bool homeDir) {
+	_history.load(path, homeDir);
 }
 
 // Save the command history to the specified file.
-void Console::saveHistory(std::string const &path) {
-	_history.save(path);
+void Console::saveHistory(std::string const &path, bool homeDir) const {
+	_history.save(path, homeDir);
 }
 
 // Add the specified string to the end of the history.
